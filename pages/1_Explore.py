@@ -54,7 +54,9 @@ df = svc.search(
 
 # ---- Results ----------------------------------------------------------------
 info_col, export_col = st.columns([5, 1], vertical_alignment="center")
-info_col.markdown(f"**{len(df):,}** datasets match" + (" — select a row to see details" if len(df) else ""))
+total = df.attrs.get("total", len(df))
+shown = f" (showing the top {len(df):,} — refine to narrow down)" if total > len(df) else ""
+info_col.markdown(f"**{total:,}** datasets match{shown}" + (" — select a row to see details" if len(df) else ""))
 with export_col:
     csv_download(df, "kaggle_search_results.csv")
 

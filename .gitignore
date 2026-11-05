@@ -4,4 +4,4 @@ data/*.db
 data/*.db-*
 __pycache__/
 .venv/
-!data/seed_datasets.db
+data/downloads/

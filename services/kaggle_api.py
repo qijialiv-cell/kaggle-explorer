@@ -154,6 +154,25 @@ class KaggleAdapter(DatasetAdapter):
         info = data.get("info", data) if isinstance(data, dict) else {}
         return info.get("description") or None
 
+    def download_file(self, ref: str, file_name: str, dest_dir: Path) -> Path:
+        """Download one file of a dataset into dest_dir (unzipped) and return its local path."""
+        api = self._client()
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for attempt in range(3):  # retry transient network/TLS drops
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    api.dataset_download_file(ref, file_name, path=str(dest_dir), force=True,
+                                              quiet=True, unzip=True)
+                break
+            except Exception as exc:
+                if attempt == 2 or "404" in str(exc) or "403" in str(exc):
+                    raise AdapterError(f"Could not download {file_name} from {ref}: {exc}") from exc
+                time.sleep(2 * (attempt + 1))
+        found = [p for p in dest_dir.rglob("*") if p.is_file()]
+        if not found:
+            raise AdapterError(f"Kaggle returned no file for {file_name}.")
+        return max(found, key=lambda p: p.stat().st_mtime)
+
     # -- mapping ----------------------------------------------------------
     def _to_record(self, d, fmt: str | None) -> DatasetRecord:
         ref = d.ref

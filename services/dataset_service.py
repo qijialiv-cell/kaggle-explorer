@@ -1,10 +1,13 @@
 """Everything the UI needs: sync from adapters into SQLite, search/filter, details, bookmarks."""
 from __future__ import annotations
 
+import hashlib
 import json
+import shutil
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable
 
 import pandas as pd
@@ -170,14 +173,27 @@ def load_details(dataset_id: str, force: bool = False) -> None:
     adapter = get_adapter(row["source"])
     files = adapter.get_files(row["ref"])
     description = row["description"] or adapter.get_description(row["ref"])
-    with get_conn() as conn:
-        conn.execute("DELETE FROM dataset_files WHERE dataset_id=?", (dataset_id,))
-        conn.executemany("INSERT OR IGNORE INTO dataset_files VALUES (?, ?, ?)",
-                         [(dataset_id, f.name, f.size_bytes) for f in files])
-        conn.executemany("INSERT OR IGNORE INTO dataset_formats VALUES (?, ?)",
-                         [(dataset_id, f) for f in formats_from_filenames([f.name for f in files])])
-        conn.execute("UPDATE datasets SET description=?, details_fetched_at=? WHERE id=?",
-                     (description, _now(), dataset_id))
+    save_details(dataset_id, files, description)
+
+
+MAX_FILES_STORED = 300  # keeps the cache small for datasets with thousands of files
+
+
+def save_details(dataset_id: str, files: list, description: str | None, conn=None) -> None:
+    """Store a dataset's file list + description and derive formats from file extensions."""
+    def _write(c):
+        c.execute("DELETE FROM dataset_files WHERE dataset_id=?", (dataset_id,))
+        c.executemany("INSERT OR IGNORE INTO dataset_files VALUES (?, ?, ?)",
+                      [(dataset_id, f.name, f.size_bytes) for f in files[:MAX_FILES_STORED]])
+        c.executemany("INSERT OR IGNORE INTO dataset_formats VALUES (?, ?)",
+                      [(dataset_id, f) for f in formats_from_filenames([f.name for f in files])])
+        c.execute("UPDATE datasets SET description=COALESCE(?, description), details_fetched_at=? WHERE id=?",
+                  (description, _now(), dataset_id))
+    if conn is not None:
+        _write(conn)
+    else:
+        with get_conn() as c:
+            _write(c)
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +228,8 @@ def _finish_frame(df: pd.DataFrame) -> pd.DataFrame:
 
 def search(text: str = "", licenses: list[str] | None = None, formats: list[str] | None = None,
            tags: list[str] | None = None, min_mb: float | None = None, max_mb: float | None = None,
-           sort: str = "Most votes", limit: int = 5000) -> pd.DataFrame:
+           sort: str = "Most votes", limit: int = 1000) -> pd.DataFrame:
+    """Return up to `limit` matches; the total match count is in df.attrs['total']."""
     where, params = ["1=1"], []
 
     for word in text.split():
@@ -238,11 +255,16 @@ def search(text: str = "", licenses: list[str] | None = None, formats: list[str]
         params.append(max_mb * 1_000_000)
 
     order = SORT_OPTIONS.get(sort, SORT_OPTIONS["Most votes"])
-    sql = f"SELECT {_LIST_COLUMNS} FROM datasets d WHERE {' AND '.join(where)} ORDER BY {order} LIMIT ?"
-    params.append(limit)
+    where_sql = " AND ".join(where)
+    # Pick the page of ids first (cheap), then compute tags/formats only for those rows.
+    sql = (f"SELECT {_LIST_COLUMNS} FROM datasets d WHERE d.id IN "
+           f"(SELECT d.id FROM datasets d WHERE {where_sql} ORDER BY {order} LIMIT ?) ORDER BY {order}")
     with get_conn() as conn:
-        df = pd.read_sql_query(sql, conn, params=params)
-    return _finish_frame(df)
+        total = conn.execute(f"SELECT count(*) FROM datasets d WHERE {where_sql}", params).fetchone()[0]
+        df = pd.read_sql_query(sql, conn, params=[*params, limit])
+    df = _finish_frame(df)
+    df.attrs["total"] = total
+    return df
 
 
 def get_dataset(dataset_id: str) -> dict | None:
@@ -329,3 +351,43 @@ def bookmark_users() -> list[str]:
 
 def ensure_db() -> None:
     init_db()
+
+
+# ---------------------------------------------------------------------------
+# Downloading single files for the Analyze page
+# ---------------------------------------------------------------------------
+DOWNLOAD_DIR = config.DB_PATH.parent / "downloads"
+MAX_ANALYZE_MB = float(config.get_setting("max_analyze_mb", 150))  # keeps memory use safe on the cloud
+KEEP_DOWNLOADS = 6  # most recent files kept on disk; older ones are deleted
+
+
+def _download_key(dataset_id: str, file_name: str) -> str:
+    """Short folder name per file (long nested Kaggle paths overflow Windows' 260-char limit)."""
+    return hashlib.md5(f"{dataset_id}|{file_name}".encode()).hexdigest()[:16]
+
+
+def download_for_analysis(dataset_id: str, file_name: str) -> Path:
+    """Download one file of a dataset (reusing a previous download) and return its path."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT source, ref FROM datasets WHERE id=?", (dataset_id,)).fetchone()
+    if row is None:
+        raise ValueError(f"Unknown dataset {dataset_id}")
+    dest = DOWNLOAD_DIR / _download_key(dataset_id, file_name)
+    done = [p for p in dest.rglob("*") if p.is_file()] if dest.exists() else []
+    if done:
+        dest.touch()
+        return done[0]
+
+    tmp = dest.with_name(dest.name + ".part")
+    shutil.rmtree(tmp, ignore_errors=True)
+    path = get_adapter(row["source"]).download_file(row["ref"], file_name, tmp)
+    shutil.rmtree(dest, ignore_errors=True)
+    tmp.rename(dest)
+    _prune_downloads()
+    return dest / path.relative_to(tmp)
+
+
+def _prune_downloads() -> None:
+    dirs = [d for d in DOWNLOAD_DIR.iterdir() if d.is_dir() and not d.name.endswith(".part")]
+    for old in sorted(dirs, key=lambda d: d.stat().st_mtime, reverse=True)[KEEP_DOWNLOADS:]:
+        shutil.rmtree(old, ignore_errors=True)

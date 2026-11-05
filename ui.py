@@ -101,13 +101,8 @@ def render_detail(dataset_id: str) -> None:
         st.warning("Dataset not found in the local cache.")
         return
 
-    if not ds.get("details_fetched_at"):
-        with st.spinner("Loading files and description from Kaggle…"):
-            try:
-                svc.load_details(dataset_id)
-                ds = svc.get_dataset(dataset_id)
-            except AdapterError as exc:
-                st.warning(f"Couldn't load full details: {exc}")
+    # Everything below comes from the local cache; Kaggle is only called on an explicit click.
+    cached = bool(ds.get("details_fetched_at"))
 
     with st.container(border=True):
         head, link = st.columns([4, 1], vertical_alignment="center")
@@ -137,8 +132,10 @@ def render_detail(dataset_id: str) -> None:
             if ds.get("description"):
                 with st.container(height=400):
                     st.markdown(ds["description"])
+            elif cached:
+                st.caption("Kaggle has no description for this dataset.")
             else:
-                st.caption("No description available.")
+                st.caption("Description not cached yet — use the button in the Files tab to load it.")
 
         with tab_files:
             if ds["files"]:
@@ -146,12 +143,24 @@ def render_detail(dataset_id: str) -> None:
                 files["size"] = files["size_bytes"].map(fmt_size)
                 st.dataframe(files[["name", "size"]], hide_index=True, width="stretch",
                              height=min(38 + 35 * len(files), 400))
+                if len(files) >= svc.MAX_FILES_STORED:
+                    st.caption(f"Showing the first {svc.MAX_FILES_STORED} files — see Kaggle for the full list.")
+            elif cached:
+                st.caption("No file list on Kaggle (e.g. a BigQuery dataset).")
             else:
-                st.caption("No file list cached yet.")
-            if st.button("Refresh details from Kaggle", key=f"refresh_{dataset_id}",
-                         icon=":material/refresh:"):
+                st.caption("File list not cached yet.")
+            from services.analysis import is_tabular
+
+            b1, b2 = st.columns(2)
+            if any(is_tabular(f["name"]) for f in ds["files"]) and b2.button(
+                    "Analyze a file", key=f"analyze_{dataset_id}", icon=":material/analytics:",
+                    type="primary"):
+                st.session_state["analyze_id"] = dataset_id
+                st.switch_page("pages/2_Analyze.py")
+            label = "Refresh from Kaggle" if cached else "Load files & description from Kaggle"
+            if b1.button(label, key=f"refresh_{dataset_id}", icon=":material/refresh:"):
                 try:
-                    with st.spinner("Refreshing…"):
+                    with st.spinner("Contacting Kaggle…"):
                         svc.load_details(dataset_id, force=True)
                     st.rerun()
                 except AdapterError as exc:

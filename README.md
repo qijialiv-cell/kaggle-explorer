@@ -66,7 +66,17 @@ data/datasets.db       运行后自动生成
 1. 把本仓库 push 到 GitHub（建议 Private）。
 2. 在 https://share.streamlit.io 用 GitHub 登录 → **Create app** → 选仓库、分支 `main`、主文件 `app.py`。
 3. **Advanced settings → Secrets**：粘贴本地 `.streamlit/secrets.toml` 的全部内容（Kaggle token、`allowed_emails`、`access_code`）。
-4. Deploy。首次启动会从 `data/seed_datasets.db` 复制元数据缓存。
+4. Deploy。首次启动会从 `data/seed_datasets.db.gz` 解压元数据缓存（含文件列表与描述），浏览时不再实时调用 Kaggle。
+
+### 预缓存全部 Kaggle 元数据
+
+```bash
+python scripts/build_cache.py                  # 抓取列表 + 每个数据集的文件列表与描述（可断点续跑）
+python scripts/build_cache.py --phase details  # 只补齐详情
+python scripts/build_cache.py --export         # 生成 data/seed_datasets.db.gz，提交后推送即重新部署
+```
+
+脚本会自动限速以避开 Kaggle 的 429 限流；约 2.6 万个数据集的详情需要十几个小时，运行期间电脑不会自动休眠。
 
 注意：Streamlit Cloud 的磁盘不持久——应用重启/休眠唤醒/重新部署后，SQLite 会回到 seed 状态，**收藏会丢失**。需要长期保存收藏时，把 bookmarks 表换成外部数据库（如 Supabase Postgres 或 Google Sheets）。
 
@@ -76,3 +86,10 @@ data/datasets.db       运行后自动生成
 - Kaggle token 只放在服务器的 `.streamlit/secrets.toml` 或环境变量里（`KAGGLE_API_TOKEN`）。
 - 收藏没有登录系统，靠侧边栏填名字区分，适合小团队；需要权限控制时再加认证。
 - 使用任何数据集前请在 Kaggle 页面确认 License；团队共用一个 Kaggle 账号前确认符合 Kaggle 条款与学校政策。
+
+## Analyze 页面与 Gemini 研究助手
+
+- **Analyze**：选一个数据集和其中的 CSV / Excel / JSON / Parquet 文件，应用会下载该文件并给出描述性统计（列类型、缺失值、均值/标准差/分位数/偏度/峰度/异常值、频数表、Pearson/Spearman 相关、分组比较），所有表格可导出 CSV。逻辑在 `services/analysis.py`。超过 150 MB 的文件不分析（可用 `max_analyze_mb` 调整）。
+- **🤖 Ask Gemini** 标签页：粘贴自己的 Gemini API key（https://aistudio.google.com/apikey），即可就当前数据提问，或一键生成研究问题、假设、分析方案、数据质量检查、教学活动、论文提纲。逻辑在 `services/llm.py`。
+  - Key 只保存在当前浏览器会话中，不写入磁盘、不共享，退出登录即清除。也可在 Secrets 中设置 `gemini_api_key` 供全组共用。
+  - 默认只发送数据集描述和统计摘要；打开 “Also send the first 20 rows” 才会发送前 20 行原始数据。含个人或敏感信息的数据不要打开。

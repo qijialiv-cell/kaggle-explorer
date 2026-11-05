@@ -3,3 +3,5 @@ kaggle>=2.0
 six            # needed by kaggle 2.x but not declared by it
 pandas>=2.0
 truststore     # trust the OS certificate store (needed behind school TLS inspection)
+openpyxl       # read .xlsx files on the Analyze page
+google-genai   # Gemini research assistant on the Analyze page

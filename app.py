@@ -27,12 +27,15 @@ with col1, st.container(border=True):
     st.markdown("**🔎 Explore**\n\nSearch by keyword, filter by license, format, size and tags, "
                 "sort by popularity or update date, and export results to CSV.")
     st.page_link("pages/1_Explore.py", label="Open Explore", icon=":material/arrow_forward:")
+    st.markdown("**📈 Analyze**\n\nDownload one data file and get descriptive statistics: missing "
+                "values, summaries, frequencies, correlations.")
+    st.page_link("pages/2_Analyze.py", label="Open Analyze", icon=":material/arrow_forward:")
 with col2, st.container(border=True):
     st.markdown("**★ Bookmarks**\n\nSee what you and your teammates saved, with notes on why each "
                 "dataset is useful.")
-    st.page_link("pages/2_Bookmarks.py", label="Open Bookmarks", icon=":material/arrow_forward:")
+    st.page_link("pages/3_Bookmarks.py", label="Open Bookmarks", icon=":material/arrow_forward:")
 with col3, st.container(border=True):
     st.markdown("**⚙️ Admin**\n\nCheck the Kaggle connection and refresh the cached metadata.")
-    st.page_link("pages/3_Admin.py", label="Open Admin", icon=":material/arrow_forward:")
+    st.page_link("pages/4_Admin.py", label="Open Admin", icon=":material/arrow_forward:")
 
 st.caption("Always check each dataset's license on Kaggle before using it in teaching or research.")

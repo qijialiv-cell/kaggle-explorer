@@ -29,7 +29,8 @@ def current_email() -> str | None:
 
 
 def logout() -> None:
-    st.session_state.pop("auth_email", None)
+    for key in ("auth_email", "gemini_key", "gemini_models"):  # forget any pasted Gemini key too
+        st.session_state.pop(key, None)
 
 
 def require_login() -> str:

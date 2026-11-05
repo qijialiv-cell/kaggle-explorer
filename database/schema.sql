@@ -65,3 +65,9 @@ CREATE TABLE IF NOT EXISTS refresh_log (
     status      TEXT,
     message     TEXT
 );
+
+-- Small key/value store, e.g. which seed snapshot this database was built from.
+CREATE TABLE IF NOT EXISTS app_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
