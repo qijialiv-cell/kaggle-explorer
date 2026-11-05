@@ -1,0 +1,5 @@
+streamlit>=1.50
+kaggle>=2.0
+six            # needed by kaggle 2.x but not declared by it
+pandas>=2.0
+truststore     # trust the OS certificate store (needed behind school TLS inspection)
