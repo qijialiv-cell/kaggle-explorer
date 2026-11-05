@@ -57,6 +57,19 @@ data/datasets.db       运行后自动生成
 2. 在 `dataset_service.get_adapter()` 注册它。
 3. 表结构不用改：`datasets.id` 已经是 `"<source>:<ref>"`。
 
+## 登录
+
+每个页面都要求登录：邮箱必须在 `allowed_emails` 白名单里，并输入共享的 `access_code`（都放在 secrets 里，不进代码库）。连续输错 5 次锁定 60 秒。收藏自动使用登录邮箱。加人 = 在 secrets 的 `allowed_emails` 里加一行。
+
+## 部署到 Streamlit Community Cloud
+
+1. 把本仓库 push 到 GitHub（建议 Private）。
+2. 在 https://share.streamlit.io 用 GitHub 登录 → **Create app** → 选仓库、分支 `main`、主文件 `app.py`。
+3. **Advanced settings → Secrets**：粘贴本地 `.streamlit/secrets.toml` 的全部内容（Kaggle token、`allowed_emails`、`access_code`）。
+4. Deploy。首次启动会从 `data/seed_datasets.db` 复制元数据缓存。
+
+注意：Streamlit Cloud 的磁盘不持久——应用重启/休眠唤醒/重新部署后，SQLite 会回到 seed 状态，**收藏会丢失**。需要长期保存收藏时，把 bookmarks 表换成外部数据库（如 Supabase Postgres 或 Google Sheets）。
+
 ## 部署到内部服务器
 
 - 服务器上同样 `pip install -r requirements.txt`，`streamlit run app.py --server.port 8501`，前面可加 Nginx / 学校 SSO。
